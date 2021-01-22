@@ -59,7 +59,7 @@ public class chemblAPI : MonoBehaviour
 
 
 
-
+    /*
     void Start()
     {
         // Create a request for the URL.
@@ -87,5 +87,5 @@ public class chemblAPI : MonoBehaviour
         }
 
         response.Close();
-    }
+    }*/
 }

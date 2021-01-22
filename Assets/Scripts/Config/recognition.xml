@@ -1,0 +1,14 @@
+<config>
+    <TextUI>
+        <chemicalTextUI>compounds_data_text</chemicalTextUI>
+        <buttonHeldTextUI>compounds_button_held</buttonHeldTextUI>
+    </TextUI>
+    <buttons>
+        <activationButton>space</activationButton>
+    </buttons>
+    <activationKeys>
+        <pubChem>begin search</pubChem>
+        <browser>browser search</browser>
+        <structure>structure search</structure>
+    </activationKeys>
+</config>

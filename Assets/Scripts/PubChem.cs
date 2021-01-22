@@ -1,13 +1,4 @@
-﻿using UnityEngine;
-using System.Collections;
-using System.Collections.Generic;
-using System.Xml;
-using System.IO;
-using System.Net;
-using System;
-using System.Linq;
-using System.Threading;
-using System.Web;
+﻿using System.Collections.Generic;
 
 // Purpose:
 //      Uses PubChem's public PUG REST API to gather the molecular formula, molecule weight, acidic pKa, melting point, boiling point
@@ -49,89 +40,20 @@ public class PubChem
 
         if (!cache.ReadChemical(ref chemical, elementName))
         {
-            // First Lookup CID (Used for other API, Molecular Formula & Molecular Weight
-            string URL = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/" + elementName + "/property/MolecularFormula,MolecularWeight/xml";
-            XmlDocument doc = PubGetRequest(URL);
-            string CID = doc.GetElementsByTagName("CID")[0].InnerXml;
-            string molecularFormula = ParseResponse(ref doc, "MolecularFormula", "Molecular Formula", true);
-            string molecularWeight = ParseResponse(ref doc, "MolecularWeight", "Molecular Weight", true);
-
-            // Get the melting point using the previously found CID
-            URL = "https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/" + CID + "/xml/?heading=Melting+Point";
-            doc = PubGetRequest(URL);
-            string meltingPoint = ParseResponse(ref doc, "String", "Melting Point", true);
-
-            // Boiling Point
-            URL = "https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/" + CID + "/xml/?heading=Boiling+Point";
-            doc = PubGetRequest(URL);
-            string boilingPoint = ParseResponse(ref doc, "String", "Boiling Point", true);
-
-            // Acidc pKa
-            URL = "https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/" + CID + "/xml/?heading=pKa";
-            doc = PubGetRequest(URL);
-            string pka = ParseResponse(ref doc, "Number", "pKa", true);
-            
+            List<string> tagNames = new List<string>();
+            tagNames.Add("CID");
+            tagNames.Add("MolecularFormula");
+            tagNames.Add("MolecularWeight");
+            XMLParser.ParseListHTTPXML("https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/" + elementName + "/property/MolecularFormula,MolecularWeight/xml", ref tagNames);
             chemical.SetName(elementName);
-            chemical.SetCid(CID);
-            chemical.SetMolecularFormula(molecularFormula);
-            chemical.SetMolecularWeight(molecularWeight);
-            chemical.SetMeltingPoint(meltingPoint);
-            chemical.SetBoilingPoint(boilingPoint);
-            chemical.SetPka(pka);
-            UnityEngine.Debug.Log("Writing to cache: " + chemical.GetAllProperties());
+            chemical.SetCid(tagNames[0]);
+            chemical.SetMolecularFormula(tagNames[1]);
+            chemical.SetMolecularWeight(tagNames[2]);
+            chemical.SetMeltingPoint(XMLParser.ParseSingleHTTPXML("https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/" + chemical.GetCid() + "/xml/?heading=Melting+Point", "String"));
+            chemical.SetBoilingPoint(XMLParser.ParseSingleHTTPXML("https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/" + chemical.GetCid() + "/xml/?heading=Boiling+Point", "String"));
+            chemical.SetPka(XMLParser.ParseSingleHTTPXML("https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/" + chemical.GetCid() + "/xml/?heading=pKa", "Number"));
             cache.WriteChemical(ref chemical);
-            
         }
         return; // Chemical is passed by reference so no need to return it
     }
-
-    // Makes a GET Request to the URL, retrieves the response and returns the loaded XML Doc
-    private static XmlDocument PubGetRequest(string URL)
-    {
-        try
-        {
-            WebRequest request = WebRequest.Create(URL);
-            WebResponse response = request.GetResponse();
-            Stream responseStream = (response.GetResponseStream());
-            XmlDocument doc = new XmlDocument();
-            XmlTextReader XMLReader = null;
-            XMLReader = new XmlTextReader(response.GetResponseStream());
-            doc.Load(XMLReader);
-            response.Close();
-            return doc;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    // Adds parses and adds the response to the list of responses .. Added here for clean up of redundent try / catch blocks
-    // firstEntryOnly bool will only add the first found entry, since PubChem pulls from other sites, it may repeat information that is formatted differently
-    private static string ParseResponse(ref XmlDocument doc, string tagName, string elementType, bool firstEntryOnly)
-    {
-        try
-        {
-            if (!firstEntryOnly)
-            {
-                // Adds all nodes to the reponse list
-                XmlNodeList elements = doc.GetElementsByTagName(tagName);
-                string multi = "";
-                for (int i = 0; i < elements.Count; i++)
-                    multi += elements[i].InnerXml + ", \t";
-                return multi;
-            }
-
-            else
-                return doc.GetElementsByTagName(tagName)[0].InnerXml;
-        }
-
-        catch
-        {
-            return "Unable to retrieve from server\t";
-        }
-    }
-
-    //URL = "https://pubchem.ncbi.nlm.nih.gov/image/imagefly.cgi?cid=" + CID + "&width=500&height=500";
-    //    return
 }
