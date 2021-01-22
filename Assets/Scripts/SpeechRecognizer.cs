@@ -1,15 +1,14 @@
 ﻿using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using UnityEngine.Windows.Speech;
 using System.Collections;
 using System.Collections.Generic;
-using System.Speech.Recognition;
-using System.Speech.Synthesis;
 using System.Diagnostics;
 using System.IO;
 
 // Purpose:
-//      Uses the System.Speech.Recognition library to allow for voice commands to be carried out within the virtual learning environment
+//      Uses the UnityEngine.Windows.Speech library to allow for voice commands to be carried out within the virtual learning environment
 //
 // Extra Info:
 //      Can email at jwade5219@gmail.com if you need help understanding the SpeechRecognizer, PubChem / Chembl API, or Chemical Cache
@@ -21,7 +20,8 @@ using System.IO;
 //          The library uses a google API for the recognition and may be too slow for practical uses in this project, but seems more accurate.
 //          Was not used due to speed / problems getting python to work in Unity. Might be able to get it working with sockets (attempt was unsuccessful)
 //
-//      May require you to close unity from task manager after running, I think there are problems with the speech recognizer not properly terminating on exit, causing it to hang
+//      Updated from System.Speech to UnityEngine.Windows.Speech -- Does not work with Mac but will not cause the hanging that previous library would cause on exit
+//          Would like to include Mac version later
 //
 // How it works:
 //      Must press the space bar to activate the speech recognizer
@@ -39,11 +39,12 @@ using System.IO;
 //          s2 is the regular search state that will show the found info in either the debug log or as a popup. Once a user says a known
 //              terminal word within this state, it will pass the word to PubChem.cs to be passed through their PUG REST API and return
 //              any found info on the chemical. Once the chemical is shown to the user, the active bool is set back to false, returning to state s0.
+//
+//
 
 public class SpeechRecognizer : MonoBehaviour
 {
-    private static SpeechRecognitionEngine recognizer = new SpeechRecognitionEngine(); // Speech Recognition Library
-    private static Choices commands = new Choices(); // This will be the activation key & a list of all elements loaded from FILE (terminal words)
+    private KeywordRecognizer recognizer;
     private const string nameOfChemicalTextUI = "compounds_data_text";
 
     // Activation key .. Used to tell recognizer that the next recognized element found in the commands to be processed
@@ -55,26 +56,19 @@ public class SpeechRecognizer : MonoBehaviour
 
     private const string resetActivationKey = "reset"; // keyword used to reset s1 or s2 back to s0
 
-    private bool announcedSpaceBar = false; // used in Update() for debugging if the spacebar was pressed so that the message does not overtake the console
-   
+    private static string lastRecognizedWord = ""; // Used to prevent the console from spamming the same recognized word, reducing lag.
+    private bool announcedSpaceBarHeld = false; // used to tell user they pressed the space bar in the console.
     void Start()
     {
-        //chemicalText.text = "compound";
         // Gather the recognized Word (terminal) List from the file
         List<string> terminalWords = new List<string>();
         LoadElements(ref terminalWords);
 
         // Add the recognized words to the List of commands that will be recognized
-        commands.Add(terminalWords.ToArray());
+        recognizer = new KeywordRecognizer(terminalWords.ToArray(), ConfidenceLevel.Low);
+        recognizer.Start();
 
-        Grammar grammar = new Grammar(new GrammarBuilder(commands));
-        recognizer.SetInputToDefaultAudioDevice(); 
-        recognizer.LoadGrammar(grammar);
-
-        // Errors with TimeSpan so commented out for now -- can be used to adjust for ambient noise 
-        //recognizer.InitialSilenceTimeout = TimeSpan.FromSeconds(6.0);
-        //recognizer.BabbleTimeout = TimeSpan.FromSeconds(4.0);
-        //recognizer.EndSilenceTimeout = TimeSpan.FromSeconds(1.2);
+        DisplayMessage("compounds_space_bar_held", "");
     }
 
     // Loads all elements that will be used in the recognizer into memory from the file
@@ -116,52 +110,51 @@ public class SpeechRecognizer : MonoBehaviour
     // Updates the recognizer for any new picked up words since the last frame
     // Only turns the recognizer on if the space bar was pressed, otherwise turning it off
     void Update()
-    { 
+    {
         if (Input.GetKey(KeyCode.Space))
         {
-            try // attempts to turn on the recognizer
+            if (!announcedSpaceBarHeld)
             {
-                if (!announcedSpaceBar)
-                {
-                    UnityEngine.Debug.Log("Spacebar pressed, Actively Listening for Command");
-                    announcedSpaceBar = true;
-                }
-                recognizer.RecognizeAsync(RecognizeMode.Multiple);
+                DisplayMessage("compounds_space_bar_held", "Space Bar is Held Down");
+                announcedSpaceBarHeld = true;
             }
-
-            catch {; } // The recognizer might not have been shutdown since last call, no need to restart the recognizer
-            recognizer.SpeechRecognized += recognizer_SpeechRecognized;
+            recognizer.OnPhraseRecognized += OnPhraseRecognized;
         }
-
-        else {
-            recognizer.RecognizeAsyncCancel();
-            announcedSpaceBar = false;
+        else if (announcedSpaceBarHeld)
+        {
+            DisplayMessage("compounds_space_bar_held", "");
+            announcedSpaceBarHeld = false;
         }
-
     }
 
     // This Function only runs when a word is said that matches with a recognized terminal word in commands list -- finds the word and either sets the relevant flag or goes to the correct state
-    private static void recognizer_SpeechRecognized(object sender, SpeechRecognizedEventArgs recognizedSpeech)
+    private static void OnPhraseRecognized(PhraseRecognizedEventArgs args)
     {
+        string recognizedPhrase = args.text;
+        if (recognizedPhrase == lastRecognizedWord) // Do not attempt any action as it should have been done during last call: prevents repeating into console causing lag
+            return;
+
+        lastRecognizedWord = recognizedPhrase;
+        UnityEngine.Debug.Log("Recognized Word: " + recognizedPhrase);
         // Activation Keys were said, set the relevant bools that will being either s1 (browser search) or s2 (regular pubchem API search); will begin check for terminal word (compound) on next frame
-        if (recognizedSpeech.Result.Text == browserActivationKey && !browserActive)
+        if (recognizedPhrase == browserActivationKey && !browserActive)
         {
             string message = "Browser Search Activation set.. Say element to begin browser search";
             DisplayMessage(nameOfChemicalTextUI, message);
             browserActive = true; // branch to s1
         }
 
-        else if (recognizedSpeech.Result.Text == pubChemActivationKey && !pubChemActive)
+        else if (recognizedPhrase == pubChemActivationKey && !pubChemActive)
         {
             string message = "PubChem Activation set.. Say element to begin pubChem search";
             DisplayMessage(nameOfChemicalTextUI, message);
             pubChemActive = true; // branch to s2
         }
 
-        else if (browserActive && recognizedSpeech.Result.Text != pubChemActivationKey && recognizedSpeech.Result.Text != browserActivationKey) // Begin s1 -- Browser Search
+        else if (browserActive && recognizedPhrase != pubChemActivationKey && recognizedPhrase != browserActivationKey) // Begin s1 -- Browser Search
         {
-            if (recognizedSpeech.Result.Text != pubChemActivationKey)
-                browserActive = BeginBrowserSearch(recognizedSpeech.Result.Text); // Return control back to s0
+            if (recognizedPhrase != pubChemActivationKey)
+                browserActive = BeginBrowserSearch(recognizedPhrase); // Return control back to s0
             else // user said other key, reverse current active so pubChemSearch is active
             {
                 pubChemActive = true;
@@ -170,10 +163,10 @@ public class SpeechRecognizer : MonoBehaviour
         }
 
 
-        else if (pubChemActive && recognizedSpeech.Result.Text != pubChemActivationKey && recognizedSpeech.Result.Text != browserActivationKey) // Begin s2 -- PubChemSearch
+        else if (pubChemActive && recognizedPhrase != pubChemActivationKey && recognizedPhrase != browserActivationKey) // Begin s2 -- PubChemSearch
         {
-            if (recognizedSpeech.Result.Text != browserActivationKey)
-                pubChemActive = BeginPubChemSearch(recognizedSpeech.Result.Text); // Return control back to s0
+            if (recognizedPhrase != browserActivationKey)
+                pubChemActive = BeginPubChemSearch(recognizedPhrase); // Return control back to s0
             else // user said other key, reverse current active so browserSearch is active
             {
                 pubChemActive = false;
@@ -181,7 +174,7 @@ public class SpeechRecognizer : MonoBehaviour
             }
         }
 
-        else if (recognizedSpeech.Result.Text == "reset")
+        else if (recognizedPhrase == "reset")
         {
             browserActive = false;
             pubChemActive = false;
@@ -215,12 +208,11 @@ public class SpeechRecognizer : MonoBehaviour
 
     void OnDestroy()
     {
-        try
+        if (recognizer != null && recognizer.IsRunning)
         {
-            recognizer.Dispose();
-            recognizer = null;
+            recognizer.OnPhraseRecognized -= OnPhraseRecognized;
+            recognizer.Stop();
         }
-        catch {; }
-        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+        recognizer.Dispose();
     }
 }

@@ -6,8 +6,6 @@ using System.IO;
 using System.Net;
 using System;
 using System.Linq;
-using System.Speech.Recognition;
-using System.Speech.Synthesis;
 using System.Threading;
 using System.Web;
 
